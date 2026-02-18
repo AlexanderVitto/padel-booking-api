@@ -23,13 +23,16 @@ func New(cfg config.Config) *gin.Engine {
 	healthHandler := handlers.NewHealthHandler()
 	courtsHandler := handlers.NewCourtsHandler()
 	bookingsHandler := handlers.NewBookingsHandler()
+	pingHandler := handlers.NewPingHandler()
 
 	// Routes
 	r.GET("/healthz", healthHandler.Healthz)
 	r.GET("/readyz", healthHandler.Readyz)
 
 	v1 := r.Group("/v1")
+	v1.Use(RequireAPIKeyForV1())
 	{
+		v1.GET("/ping", pingHandler.Ping)
 		v1.GET("/courts", courtsHandler.List)
 		v1.GET("/bookings", bookingsHandler.List)
 	}

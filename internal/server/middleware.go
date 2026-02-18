@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,6 +57,25 @@ func CORSDev() gin.HandlerFunc {
 			return
 		}
 
+		c.Next()
+	}
+}
+
+// Example
+func RequireAPIKeyForV1() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Dummy example (DO NOT use this for real auth)
+		// We'll replace with JWT auth later.
+		if c.GetHeader("X-API-KEY") == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": gin.H{
+					"code":    "unauthorized",
+					"message": "missing X-API-Key header",
+				},
+			})
+
+			return
+		}
 		c.Next()
 	}
 }
