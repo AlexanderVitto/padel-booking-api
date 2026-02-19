@@ -4,9 +4,10 @@ import (
 	"github.com/AlexanderVitto/padel-booking-api/internal/config"
 	"github.com/AlexanderVitto/padel-booking-api/internal/handlers"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func New(cfg config.Config) *gin.Engine {
+func New(cfg config.Config, pool *pgxpool.Pool) *gin.Engine {
 	if cfg.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -20,7 +21,7 @@ func New(cfg config.Config) *gin.Engine {
 	r.Use(CORSDev())
 
 	// Handlers
-	healthHandler := handlers.NewHealthHandler()
+	healthHandler := handlers.NewHealthHandler(pool)
 	courtsHandler := handlers.NewCourtsHandler()
 	bookingsHandler := handlers.NewBookingsHandler()
 	pingHandler := handlers.NewPingHandler()

@@ -7,18 +7,25 @@ import (
 )
 
 type Config struct {
-	Env  string
-	Port string
+	Env         string
+	Port        string
+	DatabaseURL string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Env:  getEnv("ENV", "development"),
-		Port: getEnv("PORT", "8080"),
+		Env:         getEnv("ENV", "development"),
+		Port:        getEnv("PORT", "8080"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
 	}
+
 	if cfg.Port == "" {
 		return Config{}, errors.New("PORT is required")
 	}
+	if cfg.DatabaseURL == "" {
+		return Config{}, errors.New("DATABASE_URL is required")
+	}
+
 	return cfg, nil
 }
 
