@@ -22,8 +22,8 @@ func New(cfg config.Config, pool *pgxpool.Pool) *gin.Engine {
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(pool)
-	courtsHandler := handlers.NewCourtsHandler()
-	bookingsHandler := handlers.NewBookingsHandler()
+	courtsHandler := handlers.NewCourtsHandler(pool)
+	bookingsHandler := handlers.NewBookingsHandler(pool)
 	pingHandler := handlers.NewPingHandler()
 
 	// Routes

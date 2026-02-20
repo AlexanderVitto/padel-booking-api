@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     email text NOT NULL UNIQUE,
     password_hash text NOT NULL,
     display_name text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- VENUES
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS venues(
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL,
     timezone text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- COURTS
