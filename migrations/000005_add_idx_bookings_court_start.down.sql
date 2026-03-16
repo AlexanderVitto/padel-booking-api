@@ -1,0 +1,1 @@
+drop index if exists idx_bookings_court_start;

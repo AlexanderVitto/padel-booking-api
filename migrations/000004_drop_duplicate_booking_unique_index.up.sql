@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS bookings_unique_confirmed_court_start;
