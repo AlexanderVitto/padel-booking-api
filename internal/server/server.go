@@ -15,7 +15,7 @@ func New(cfg config.Config, pool *pgxpool.Pool) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	// Middleware (week 1)
+	// Global middleware
 	r.Use(RequestID())
 	r.Use(RequestLogger())
 	r.Use(CORSDev())
@@ -25,19 +25,32 @@ func New(cfg config.Config, pool *pgxpool.Pool) *gin.Engine {
 	courtsHandler := handlers.NewCourtsHandler(pool)
 	bookingsHandler := handlers.NewBookingsHandler(pool)
 	pingHandler := handlers.NewPingHandler()
+	authHandler := handlers.NewAuthHandler(pool, cfg)
 
-	// Routes
+	// Health (no auth)
 	r.GET("/healthz", healthHandler.Healthz)
 	r.GET("/readyz", healthHandler.Readyz)
 
 	v1 := r.Group("/v1")
-	v1.Use(RequireAPIKeyForV1())
 	{
-		v1.GET("/ping", pingHandler.Ping)
-		v1.GET("/courts", courtsHandler.List)
-		v1.GET("/bookings", bookingsHandler.List)
+		// Public routes (no authentication required)
+		v1.POST("/auth/register", authHandler.Register)
+		v1.POST("/auth/login", authHandler.Login)
+		v1.POST("/auth/refresh", authHandler.Refresh)
+		v1.POST("/auth/logout", authHandler.Logout)
+
+		// Protected routes (require JWT)
+		protected := v1.Group("/")
+		protected.Use(RequireJWT(cfg.JWTAccessSecret))
+		{
+			protected.GET("/ping", pingHandler.Ping)
+			protected.GET("/courts", courtsHandler.List)
+			protected.GET("/bookings", bookingsHandler.List)
+			protected.GET("/bookings/:id", bookingsHandler.GetByID)
+			protected.POST("/bookings", bookingsHandler.Create)
+			protected.PATCH("/bookings/:id/cancel", bookingsHandler.Cancel)
+		}
 	}
 
 	return r
-
 }

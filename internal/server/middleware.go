@@ -3,9 +3,11 @@ package server
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -61,21 +63,67 @@ func CORSDev() gin.HandlerFunc {
 	}
 }
 
-// Example
-func RequireAPIKeyForV1() gin.HandlerFunc {
+// RequireJWT memvalidasi access token dari header Authorization: Bearer <token>.
+// Menyimpan user_id dan user_email ke gin context untuk dipakai handler.
+func RequireJWT(accessSecret string) gin.HandlerFunc {
+	key := []byte(accessSecret)
+
 	return func(c *gin.Context) {
-		// Dummy example (DO NOT use this for real auth)
-		// We'll replace with JWT auth later.
-		if c.GetHeader("X-API-KEY") == "" {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{
+				"code":    "unauthorized",
+				"message": "Missing Authorization header",
+			}})
+			return
+		}
+
+		// format: "Bearer <token>"
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{
+				"code":    "unauthorized",
+				"message": "Authorization header must be in format: Bearer <token>",
+			}})
+			return
+		}
+
+		tokenStr := parts[1]
+
+		// parse & validasi token
+		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+			// pastikan signing method adalah HS256
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return key, nil
+		}, jwt.WithExpirationRequired())
+
+		if err != nil || !token.Valid {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{
 					"code":    "unauthorized",
-					"message": "missing X-API-Key header",
+					"message": "Invalid or expired token",
 				},
 			})
-
 			return
 		}
+
+		// ambil claims dan simpan ke context
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": gin.H{
+					"code":    "unauthorized",
+					"message": "Invalid token claims",
+				},
+			})
+			return
+		}
+
+		c.Set("user_id", claims["sub"])
+		c.Set("email", claims["email"])
 		c.Next()
 	}
+
 }
