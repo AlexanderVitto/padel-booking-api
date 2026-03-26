@@ -26,6 +26,7 @@ func New(cfg config.Config, pool *pgxpool.Pool) *gin.Engine {
 	bookingsHandler := handlers.NewBookingsHandler(pool)
 	pingHandler := handlers.NewPingHandler()
 	authHandler := handlers.NewAuthHandler(pool, cfg)
+	profileHandler := handlers.NewProfileHandler(pool) // ← baru
 
 	// Health (no auth)
 	r.GET("/healthz", healthHandler.Healthz)
@@ -44,7 +45,15 @@ func New(cfg config.Config, pool *pgxpool.Pool) *gin.Engine {
 		protected.Use(RequireJWT(cfg.JWTAccessSecret))
 		{
 			protected.GET("/ping", pingHandler.Ping)
+
+			// Profile
+			protected.GET("/me", profileHandler.GetMe)
+			protected.PATCH("/me", profileHandler.UpdateMe)
+
+			// Courts
 			protected.GET("/courts", courtsHandler.List)
+
+			// Bookings
 			protected.GET("/bookings", bookingsHandler.List)
 			protected.GET("/bookings/:id", bookingsHandler.GetByID)
 			protected.POST("/bookings", bookingsHandler.Create)
