@@ -1,0 +1,22 @@
+# Environment variables — JANGAN PERNAH di-commit
+.env
+.env.*
+!.env.example
+
+# Go build artifacts
+/bin/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+*.out
+coverage.html
