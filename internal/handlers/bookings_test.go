@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,57 +10,38 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	gin.SetMode(gin.TestMode)
+// setUserContext adalah helper untuk simulasi RequireJWT middleware di test.
+// Set user_id ke gin context seperti yang dilakukan middleware aslinya.
+func setUserContext(c *gin.Context, userID string) {
+	c.Set("user_id", userID)
 }
 
-func TestIsValidUUID(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", true},
-		{"22222222-2222-2222-2222-222222222222", true},
-		{"not-a-uuid", false},
-		{"", false},
-		{"12345678-1234-1234-1234-12345678901z", false},
-	}
+const testUserID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 
-	for _, tt := range tests {
-		got := isValidUUID(tt.input)
-		if got != tt.want {
-			t.Errorf("isValidUUID(%q) = %v, want %v", tt.input, got, tt.want)
-		}
-	}
-}
+// ── List ──────────────────────────────────────────────────────────────────
 
-func TestParseIntQuery(t *testing.T) {
-	tests := []struct {
-		input    string
-		fallback int
-		want     int
-	}{
-		{"10", 20, 10},
-		{"", 20, 20},
-		{"abc", 20, 20},
-		{"0", 20, 0},
-		{"-5", 20, -5},
-	}
-
-	for _, tt := range tests {
-		got := parseIntQuery(tt.input, tt.fallback)
-		if got != tt.want {
-			t.Errorf("parseIntQuery(%q, %d) = %d, want %d", tt.input, tt.fallback, got, tt.want)
-		}
-	}
-}
-
-func TestList_MissingCourtID(t *testing.T) {
+func TestList_MissingUserContext(t *testing.T) {
 	h := &BookingsHandler{pool: nil}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?date=2026-02-28", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings", nil)
+
+	// sengaja tidak set user_id di context → simulasi middleware tidak jalan
+	h.List(c)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestList_InvalidCourtID(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?court_id=not-a-uuid", nil)
+	setUserContext(c, testUserID)
 
 	h.List(c)
 
@@ -67,13 +50,13 @@ func TestList_MissingCourtID(t *testing.T) {
 	}
 }
 
-func TestList_InvalidCourtIDUUID(t *testing.T) {
+func TestList_InvalidDate(t *testing.T) {
 	h := &BookingsHandler{pool: nil}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?court_id=not-a-uuid&date=2026-02-28", nil)
-	c.Params = gin.Params{{Key: "court_id", Value: "not-a-uuid"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?date=not-a-date", nil)
+	setUserContext(c, testUserID)
 
 	h.List(c)
 
@@ -82,17 +65,49 @@ func TestList_InvalidCourtIDUUID(t *testing.T) {
 	}
 }
 
-func TestList_MissingDate(t *testing.T) {
+func TestList_InvalidLimit(t *testing.T) {
 	h := &BookingsHandler{pool: nil}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?court_id=22222222-2222-2222-2222-222222222222", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?limit=999", nil)
+	setUserContext(c, testUserID)
 
 	h.List(c)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestList_InvalidCursor(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings?cursor=not-a-timestamp", nil)
+	setUserContext(c, testUserID)
+
+	h.List(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// ── GetByID ───────────────────────────────────────────────────────────────
+
+func TestGetByID_MissingUserContext(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings/some-id", nil)
+
+	h.GetByID(c)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
 	}
 }
 
@@ -103,11 +118,127 @@ func TestGetByID_InvalidUUID(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/bookings/not-a-uuid", nil)
 	c.Params = gin.Params{{Key: "id", Value: "not-a-uuid"}}
+	setUserContext(c, testUserID)
 
 	h.GetByID(c)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// ── Create ────────────────────────────────────────────────────────────────
+
+func TestCreate_MissingUserContext(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/bookings", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.Create(c)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestCreate_InvalidBody(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/bookings", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setUserContext(c, testUserID)
+
+	h.Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestCreate_InvalidCourtID(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	body, _ := json.Marshal(map[string]string{
+		"court_id":   "not-a-uuid",
+		"start_time": "2026-12-01T10:00:00Z",
+		"end_time":   "2026-12-01T11:00:00Z",
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/bookings", bytes.NewBuffer(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setUserContext(c, testUserID)
+
+	h.Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestCreate_EndTimeBeforeStartTime(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	body, _ := json.Marshal(map[string]string{
+		"court_id":   "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		"start_time": "2026-12-01T11:00:00Z",
+		"end_time":   "2026-12-01T10:00:00Z", // end sebelum start
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/bookings", bytes.NewBuffer(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setUserContext(c, testUserID)
+
+	h.Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestCreate_StartTimeInPast(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	body, _ := json.Marshal(map[string]string{
+		"court_id":   "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		"start_time": "2020-01-01T10:00:00Z", // di masa lalu
+		"end_time":   "2020-01-01T11:00:00Z",
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/bookings", bytes.NewBuffer(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setUserContext(c, testUserID)
+
+	h.Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// ── Cancel ────────────────────────────────────────────────────────────────
+
+func TestCancel_MissingUserContext(t *testing.T) {
+	h := &BookingsHandler{pool: nil}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPatch, "/v1/bookings/some-id/cancel", nil)
+
+	h.Cancel(c)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
 	}
 }
 
@@ -118,6 +249,7 @@ func TestCancel_InvalidUUID(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPatch, "/v1/bookings/not-a-uuid/cancel", nil)
 	c.Params = gin.Params{{Key: "id", Value: "not-a-uuid"}}
+	setUserContext(c, testUserID)
 
 	h.Cancel(c)
 

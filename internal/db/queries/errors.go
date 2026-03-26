@@ -10,6 +10,7 @@ import (
 var (
 	ErrBookingConflict      = errors.New("booking conflict")
 	ErrBookingNotFound      = errors.New("booking not found")
+	ErrForbidden            = errors.New("forbidden")
 	ErrUserNotFound         = errors.New("user not found")
 	ErrEmailTaken           = errors.New("email already taken")
 	ErrRefreshTokenNotFound = errors.New("refresh token not found")

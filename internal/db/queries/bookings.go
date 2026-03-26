@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,14 +14,19 @@ type Booking struct {
 	StartTime time.Time `json:"start_time"`
 	EndTime   time.Time `json:"end_time"`
 	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type ListBookingsParams struct {
-	CourtID string
-	Date    time.Time
-	Limit   int
+	// UserID wajib — user hanya bisa lihat booking miliknya sendiri
+	UserID string
+	// CourtID opsional — kalau diisi, filter by court
+	CourtID *string
+	// Date opsional — kalau diisi, filter by tanggal
+	Date  *time.Time
+	Limit int
 	// Cursor adalah start_time booking terakhir dari halaman sebelumnya.
-	// Nil → ambil dari awal hari.
+	// Nil → ambil dari awal.
 	Cursor *time.Time
 }
 
@@ -33,39 +37,31 @@ type ListBookingsResult struct {
 	Limit      int        `json:"limit"`
 }
 
-func ListBookingsByCourtAndDate(ctx context.Context, pool *pgxpool.Pool, p ListBookingsParams) (ListBookingsResult, error) {
-	startOfDay := time.Date(p.Date.Year(), p.Date.Month(), p.Date.Day(), 0, 0, 0, 0, time.UTC)
-	endOfDay := startOfDay.Add(24 * time.Hour)
-
-	// Ambil limit+1 untuk deteksi apakah ada halaman berikutnya.
+func ListBookingsByUser(ctx context.Context, pool *pgxpool.Pool, p ListBookingsParams) (ListBookingsResult, error) {
+	// fetchLimit+1 untuk deteksi apakah ada halaman berikutnya
 	fetchLimit := p.Limit + 1
 
-	var rows pgx.Rows
-	var err error
+	// base query — selalu filter by user_id
+	// filter court_id & date kalau diisi
+	// cursor-based pagination by start_time
+	query := `
+		select id::text, court_id::text, user_id::text, start_time, end_time, status, created_at
+		from bookings
+		where user_id = $1
+		  and ($2::uuid is null or court_id = $2::uuid)
+		  and ($3::date is null or start_time::date = $3::date)
+		  and ($4::timestamptz is null or start_time > $4)
+		order by start_time asc
+		limit $5
+	`
 
-	if p.Cursor == nil {
-		// halaman pertama → mulai dari awal hari
-		rows, err = pool.Query(ctx, `
-			select id::text, court_id::text, user_id::text, start_time, end_time, status
-			from bookings
-			where court_id = $1
-			  and start_time >= $2
-			  and start_time < $3
-			order by start_time asc
-			limit $4
-		`, p.CourtID, startOfDay, endOfDay, fetchLimit)
-	} else {
-		// halaman berikutnya → mulai dari setelah cursor
-		rows, err = pool.Query(ctx, `
-			select id::text, court_id::text, user_id::text, start_time, end_time, status
-			from bookings
-			where court_id = $1
-			  and start_time > $2
-			  and start_time < $3
-			order by start_time asc
-			limit $4
-		`, p.CourtID, p.Cursor, endOfDay, fetchLimit)
-	}
+	rows, err := pool.Query(ctx, query,
+		p.UserID,
+		p.CourtID, // nil → $2 is null → tidak filter court
+		p.Date,    // nil → $3 is null → tidak filter tanggal
+		p.Cursor,  // nil → $4 is null → mulai dari awal
+		fetchLimit,
+	)
 	if err != nil {
 		return ListBookingsResult{}, err
 	}
@@ -74,7 +70,10 @@ func ListBookingsByCourtAndDate(ctx context.Context, pool *pgxpool.Pool, p ListB
 	var bookings []Booking
 	for rows.Next() {
 		var b Booking
-		if err := rows.Scan(&b.ID, &b.CourtID, &b.UserID, &b.StartTime, &b.EndTime, &b.Status); err != nil {
+		if err := rows.Scan(
+			&b.ID, &b.CourtID, &b.UserID,
+			&b.StartTime, &b.EndTime, &b.Status, &b.CreatedAt,
+		); err != nil {
 			return ListBookingsResult{}, err
 		}
 		bookings = append(bookings, b)
@@ -110,18 +109,28 @@ func ListBookingsByCourtAndDate(ctx context.Context, pool *pgxpool.Pool, p ListB
 	}, nil
 }
 
-func GetBookingByID(ctx context.Context, pool *pgxpool.Pool, id string) (Booking, error) {
+// GetBookingByID mengambil booking by ID.
+// requestUserID dipakai untuk ownership check:
+//   - kalau booking bukan milik requestUserID → ErrForbidden
+//   - kalau booking tidak ada → ErrBookingNotFound
+func GetBookingByID(ctx context.Context, pool *pgxpool.Pool, id string, requestUserID string) (Booking, error) {
 	var b Booking
 	err := pool.QueryRow(ctx, `
-		select id::text, court_id::text, user_id::text, start_time, end_time, status
+		select id::text, court_id::text, user_id::text, start_time, end_time, status, created_at
 		from bookings
 		where id = $1
-	`, id).Scan(&b.ID, &b.CourtID, &b.UserID, &b.StartTime, &b.EndTime, &b.Status)
+	`, id).Scan(&b.ID, &b.CourtID, &b.UserID, &b.StartTime, &b.EndTime, &b.Status, &b.CreatedAt)
 	if err != nil {
 		if isNotFound(err) {
 			return Booking{}, ErrBookingNotFound
 		}
 		return Booking{}, err
 	}
+
+	// ownership check — booking ada tapi bukan milik user ini
+	if b.UserID != requestUserID {
+		return Booking{}, ErrForbidden
+	}
+
 	return b, nil
 }
